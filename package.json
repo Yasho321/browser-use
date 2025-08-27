@@ -13,6 +13,7 @@
   "dependencies": {
     "@openai/agents": "^0.0.17",
     "dotenv": "^17.2.1",
+    "image-size": "^2.0.2",
     "openai": "^5.15.0",
     "pako": "^2.1.0",
     "playwright": "^1.55.0",

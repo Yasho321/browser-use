@@ -30,135 +30,49 @@ let lastToolUsed = null;
 
 const page = await browser.newPage();
 
-const inputSelector = tool({
-    name : 'input_selector',
-    description : 'gives the input selector for the send keys', 
-    parameters : z.object({
-        query : z.string().describe('The query for which you have to find selector')
-    }),
-    async execute(input){
-        const query = input.query;
-        console.log(query);
-        
- 
-         const date = new Date().toISOString().replace(/[:.]/g, "-");
-        await page.screenshot({ fullPage: true , path : `screenshot-${date}.png`});
-        console.log('took ss');
-        
-        const fileId = await createFile(`screenshot-${date}.png`)
-        console.log('uploaded_filess');
-        fs.unlinkSync(`screenshot-${date}.png`);
-        console.log('reached here')
-       const response = await openai.responses.create({
-        model: "gpt-4.1-mini",
-        input: [
-            {
-            role: "user",
-            content: [
-                { type: "input_text", text: `Find the input selector for send keys for "${query}" in the screenshot(priority use placeholder or input type (conditionally ) selector for playwright strictly analyze given image for this ,   )` },
-                {
-                type: "input_image",
-                file_id: fileId,
-                },
-            ],
-            },
-        ],
-        });
-         const output = response.output_text || response?.output?.[0]?.content?.[0]?.text;
-        console.log("Coordinates Response:", output);
-
-        return output || "Could not determine coordinates";
-    }
-
-})
-
-const findXandYCoordinates = tool({
-    name:'find_x_and_y_coordinates',
-    description: 'Gives x and y cordinates of the element according to the query for clicking',
-    parameters: z.object({
-       
-        query : z.string().describe('The query for which you have to find x and y cordinates')
-    }), 
-    async execute(input){
-        const query = input.query;
-        console.log(query);
-        
- 
-         const date = new Date().toISOString().replace(/[:.]/g, "-");
-        await page.screenshot({ fullPage: true , path : `screenshot-${date}.png`});
-        console.log('took ss');
-        
-        const fileId = await createFile(`screenshot-${date}.png`)
-        console.log('uploaded_filess');
-        fs.unlinkSync(`screenshot-${date}.png`);
-        console.log('reached here')
-       const response = await openai.responses.create({
-        model: "gpt-4.1-mini",
-        input: [
-            {
-            role: "user",
-            content: [
-                { type: "input_text", text: `Find the x and y(increase y by 20) coordinates of the "${query}" in the screenshot accurately recheck is the cordinate really correct ` },
-                {
-                type: "input_image",
-                file_id: fileId,
-                },
-            ],
-            },
-        ],
-        });
-         const output = response.output_text || response?.output?.[0]?.content?.[0]?.text;
-        console.log("Coordinates Response:", output);
-
-        return output || "Could not determine coordinates";
-    }
-})
 
 
-const visualAnalysis = tool({
-  name: 'visual_analysis',
-  description : 'Takes a screenshot of the current page and give its analysis , that whether the desired task is complete or not , and what to do to correct , or achieve what is needed',
+const getPageInfoViaSS = tool({
+  name: 'get_page_info_via_ss',
+  description : 'Takes a screenshot of the current page and give its analysis , according to the query asked',
   parameters : z.object({
-    query: z.string().describe('Last step performed')
+    query: z.string().describe('query for required info about page you need from screenshot')
   }),
-  async execute(){
+  async execute(input){
     console.log(lastToolUsed);
+    console.log(input.query)
     
-    if (lastToolUsed === 'take_screenshot') {
-        console.log('skipping ss');
-        
-      return { status: 'Screenshot skipped to avoid consecutive calls' };
-    }
+    
     const date = new Date().toISOString().replace(/[:.]/g, "-");
     await page.screenshot({ fullPage: true , path : `screenshot-${date}.png`});
     console.log('took ss');
     
-    const fileId = await createFile(`screenshot-${date}.png`)
+    const base64Image = fs.readFileSync(`screenshot-${date}.png`, "base64");
     console.log('uploaded_filess');
     fs.unlinkSync(`screenshot-${date}.png`);
     
     lastToolUsed = 'take_screenshot'
 
+    console.log('here')
     
    const response = await openai.responses.create({
-    model: "gpt-4.1-mini",
-    input: [
+      model: "gpt-4.1-mini",
+      input: [
         {
-        role: "user",
-        content: [
-            { type: "input_text", text:  `What is in the picture give description of the picture in detail so that it can be used to imagine the whole page via words and also 
-                most importantly examine last step performed was succesfull or you have to correct it , and what should be the next step
-                 `  },
+          role: "user",
+          content: [
+            { type: "input_text", text: `${input.query}` },
             {
-            type: "input_image",
-            file_id: fileId,
+              type: "input_image",
+              image_url: `data:image/jpeg;base64,${base64Image}`,
+              detail : 'high'
             },
-        ],
+          ],
         },
-    ],
+      ],
     });
 
-   
+    console.log('here 2')
     console.log(response.output_text)
     return response.output_text;
 
@@ -208,6 +122,8 @@ const openURL = tool({
   }
 });
 
+
+
 const clickOnScreen = tool({
   name: 'click_screen',
   description: 'Clicks on the screen with specified co-ordinates',
@@ -218,7 +134,7 @@ const clickOnScreen = tool({
   async execute(input) {
     input.x;
     input.y;
-    await page.mouse.click(input.x, input.y);
+    await page.mouse.click(input.x, input.y+10);
     lastToolUsed = 'click_screen'
     console.log( `Clicked on x:${input.x} , y: ${input.y}`);
     
@@ -226,11 +142,33 @@ const clickOnScreen = tool({
   },
 });
 
+const clickElement = tool({
+  name: 'click_element_via_css',
+  description: 'Clicks on an element using a CSS selector',
+  parameters: z.object({
+    selector: z.string().describe('CSS selector of the element to click'),
+  }),
+  async execute (input) {
+    try {
+      const element = await page.$(input.selector); // Select element
+      if (!element) {
+        return  {success : false , message :`Element not found: ${selector}`};
+      }
+
+      await element.click(); // Perform click
+      return { success: true, message: `Clicked on element: ${selector}` };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  },
+});
+
+
 const sendKeys = tool({
   name: 'send_keys',
   description: 'Types text into an input field',
   parameters: z.object({
-    selector: z.string().describe('CSS selector of the input field'),
+    selector: z.string().describe('Placeholder selector or type selector or css selector of the input field'),
     text: z.string().describe('Text to type'),
   }),
   async execute(input){
@@ -271,7 +209,7 @@ const scroll = tool({
         pixels: z.number().describe('Number of pixels to scroll (positive = down, negative = up)'),
     }),
     async execute(input) {
-        await page.evaluate((pixels) => window.scrollBy(0, pixels), input.pixels);
+        await page.mouse.wheel(0, input.pixels);
         lastToolUsed = 'scroll'
         console.log(`Scrolled ${input.pixels} pixels`);
         
@@ -285,31 +223,71 @@ const websiteAutomationAgent = new Agent({
   You are an website automation agent , your work is to perform all the tasks given by the user using the tools given , 
   analyze given screenshots to determine next step to achieve users query .
 
-  rules :- 
-  - Use 'visual_analysis' to check what is happening and everything went well or not . 
-  - to nagivate and to find where to click use 'find_x_and_y_cordinates'
-  - but to put values in a form always use 'send_keys' 
-  - for send keys to find selector use 'input_selector' if failed use 'visual_analysis'
+  rules-
+  - use 'get_page_info_via_ss' tool to get any required information about page, and for checking that it went well as planed or not , if not correct
+  - use all tools required to achieve user's query (clickOnScreen , sendKeys , scroll , etc)
+  - use 'get_page_info_via_ss' to know what to do where to do how to do 
+  - for clicking first use click_element_via_css tool first if it returns Element not found: then fall back to click_screen
+  - always use click_element_via_css first if it didnt work than move to click_screen
+  - whenever giving x and y coordinates to click always keep in mind that viewport's and screenshot's width and height are (width :1280 , height : 720) increase or decrease x and y cordinates accordingly to get correct x and y
+  - use css selectors like 'text=Sign Up' and 'form button[type="submit"]' as it can be deduced from image.
+  example :- 
+  - user query :- Open ui.chaicode.com 
+    Locate the sign up section automatically via screenshot
+    click on it and after locating form via screenshot
+    Fill in the necessary details:-
+    - first name :- Yasho
+    - Last name :- Singh
+    - email :- yashosingh@gmail.com 
+    - password :- 123456
+    Click the action/submit button
+  - tool calls for this :- 
+  - open_browser()
+  - open_url({url : 'ui.chaicode.com'})
+  - get_page_info_via_ss({query :'give page structure'})
+  - get_page_infor_via_ss({query :'give simple css selector of signup button according to the image given like "text=Sign Up" '})
+  - click_element_via_css({selector : 'text=Sign Up'})(important)
+  - get_page_info({query :'Does the click performed right'})
+  - get_page_info({query :'It looks like i clicked a bit above where it needed to be , the authentication section is closed , now I need to click on the authentication section with required adjustments give x and y cordinates'})
+   - click_on_screen({x:40 , y:200})
+  - get_page_info({query :'Does the click performed right'})
+  - get_page_info({query :'Yes the click performed right , I can see sign up button again , give x and y cordinates with required adjustment keeping in mind errors from before'})
+   - click_on_screen({x:40 , y:300})
+  - get_page_infor({query :'Did the click performed right '})
+  - get_page_info({query : 'yes , I can see sign up form , now give all the selectors for user's value'})
+  - send_keys({selector : 'input[placeholder="John"]' , text : 'Yasho'})
+  - get_page_info({query :'Did the last step went well , did the first name field filled '})
+   - get_page_info({query :'Yes can move to last name now , give css selector for last name  '})
+  - send_keys({selector : 'input[placeholder="Doe"]'} , text :'Singh'})
+  - get_page_info({query :'Did the last step went well , did the last name field filled '})
+  - get_page_info({query :'Yes can move to last name now , give css selector for email  '})
+  - send_keys({selector : 'input[placeholder="john@example.com"], text: 'yashosingh@example.com'})
+  - get_page_info({query :'Did the last step went well , did the image field filled '})
+  - get_page_info({query :'Yes can move to password now , give css selector password  '})
+  - send_keys({selector : 'input[placeholder="******"], text:"123456"})
+  - get_page_info({query :'Did the last step went well , did all the fields are filled '})
+  - get_page_info({query :'I can see password field is unable to fill , giving another selector to fill it ' })
+  - send_keys({selector : 'input[type="password"]' , text:'123456'})
+  - get_page_info({query :'Did the last step went well , did all the fields are filled '})
+  - get_page_info({query :'Yes , now need to find x and y coordinates of the submit buttton '} )
+  - get_page_info({query :'submit button not visible , need to scroll in the main area of the page and by how many pixels'})
+  - click({x:900 , y:500})
+  - scroll(300)
+  - get_page_info({query :'is submit button visible now , give css selector to click on it'})
+  - click_element_via_css({selector : 'form button[type="submit"]'})
+  - get_page_info({quer: 'Yes , user query complete'})
 
-  examples of toolcalls :-
-  - user query :- 'open ui.chaicod.com' and automatically find sign up form and fill the following details ' 
-  - open_url ('ui.chaicode.com)
-  - visual_analysis()
-  - find_x_and_y_cordinates('query according to user query and visual analysis to find signup button')
-  - click({x:acc to the find x and y cordinates ,y:acc to the find x and y cordinates})
-  - visual_analysis() - to check whether the click was correct 
-  - input_selector('query according to visual analysis ')(input selector as in visual analysis we got to know it has forms)
-  - send_keys('input selector according to the last tool', 'information by user')
-  - visual_analyisi() - check whether all input fields are filled or not (and is correctly filled according to the user's query, for example:- user wants yash@gmail.com and in screenshot it is johndoe@gmail.com repeat last few steps till it is correct)
-  - find_x_and_y_cordinates('query according to user query and visual analysis to find submit button')
-  - click(x , y ) - to submit the form(scroll few pixels if not visible)
-  -visual_analysis() - to check successfully completed or not(action/submit button clicked or not)
+
+
+
+
+  
   use your basic logic to orchestrate in between 
   repeat the step if a step in between fails .
 
 
   `,
-  tools : [ visualAnalysis ,openBrowser , openURL , clickOnScreen , sendKeys ,doublClick  ,scroll , findXandYCoordinates , inputSelector]
+  tools : [ getPageInfoViaSS ,openBrowser , openURL , clickOnScreen , sendKeys ,doublClick  ,scroll , clickElement]
 });
 
 async function chatWithAgent(query) {
@@ -327,6 +305,7 @@ chatWithAgent( `
     - password :- 123456
     Click the action/submit button
 `)
+
 
 
 
